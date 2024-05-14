@@ -1,1 +1,1 @@
-TBD
+**GovInfoFetch** gets information for current politians and then it converts that info into a suitable form to be ingested into PauseAI's CRM

@@ -3,6 +3,7 @@
 // of the MIT License (https://opensource.org/licenses/MIT)
 // ********************************************************
 
+using GovInfoFetch.Models;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -13,70 +14,49 @@ internal class GovTrackClient
     private class Root
     {
         public Meta? Meta { get; set; }
-
-        public Object[]? Objects { get; set; }
+        [JsonPropertyName("objects")] public Item[]? Items { get; set; }
     }
 
-    public class Meta
+    private class Meta
     {
-        public int Limit { get; set; }
-        public int Offset { get; set; }
-        [JsonPropertyName("total_count")] public int Total { get; set; }
+        public required int Limit { get; init; }
+        public required int Offset { get; init; }
+        [JsonPropertyName("total_count")] public int Count { get; init; }
     }
 
-    public class Object
+    private class Item
     {
-        public object caucus { get; set; }
-        [JsonPropertyName("congress_numbers")] public int[] CongressNumbers { get; set; }
-        public bool current { get; set; }
-        public string? Address { get; set; }
-        public object district { get; set; }
-        public string? EndDate { get; set; }
-        public Extra? Extra { get; set; }
-        [JsonPropertyName("leadership_title")] public object leadership_title { get; set; }
-        public string? Party { get; set; }
-        public Person? Person { get; set; }
-        public string? Phone { get; set; }
-        [JsonPropertyName("role_type")] public string? RoleType { get; set; }
-        [JsonPropertyName("role_type_label")] public string? RoleTypeLabel { get; set; }
-        [JsonPropertyName("senator_class")] public string? SenatorClass { get; set; }
-        [JsonPropertyName("senator_class_label")] public string? SenatorClassLabel { get; set; }
-        [JsonPropertyName("senator_rank")] public string? SenatorRank { get; set; }
-        [JsonPropertyName("senator_rank_label")] public string? SenatorRankLabel { get; set; }
-        public string? Startdate { get; set; }
-        public string? State { get; set; }
-        public string? Title { get; set; }
-        [JsonPropertyName("title_long")] public string? TitleLong { get; set; }
-        public string? Website { get; set; }
+        public required Person? Person { get; init; }
+        [JsonPropertyName("role_type")] public required Role Role { get; init; }
+        public required Extra Extra { get; init; }
+        public required Party Party { get; init; }
+        public required string State { get; init; }
+        public required string Phone { get; init; }
+        public required string Website { get; init; }
+        public object? District { get; init; }
+        public required DateOnly StartDate { get; init; }
+        public required DateOnly EndDate { get; init; }
     }
 
-    public class Extra
+    private class Extra
     {
-        public string? Address { get; set; }
-        [JsonPropertyName("contact_form")] public string? ContactForm { get; set; }
-        public string? Office { get; set; }
-        [JsonPropertyName("rss_url")] public string? RssUrl { get; set; }
+        public string? Address { get; init; }
+        [JsonPropertyName("contact_form")] public string? ContactForm { get; init; }
+        public string? Office { get; init; }
+        [JsonPropertyName("rss_url")] public string? RssUrl { get; init; }
     }
 
-    public class Person
+    private class Person
     {
-        public string? BioGuideId { get; set; }
-        public string? Birthday { get; set; }
-        public int CspanId { get; set; }
-        [JsonPropertyName("fediverse_webfinger")] public object fediverse_webfinger { get; set; }
-        public string? FirstName { get; set; }
-        public string? Gender { get; set; }
-        [JsonPropertyName("gender_label")] public string? GenderLabel { get; set; }
-        public string? LastName { get; set; }
-        public string? Lnk { get; set; }
-        public string? MiddleName { get; set; }
-        public string? Name { get; set; }
-        public string? NameMod { get; set; }
-        public string? Nickname { get; set; }
-        public string? OsId { get; set; }
-        public string? SortName { get; set; }
-        public string? TwitterId { get; set; }
-        public string? YouTubeId { get; set; }
+        public required string BioGuideId { get; init; }
+        public required DateOnly Birthday { get; init; }
+        public required string FirstName { get; init; }
+        public required Gender Gender { get; init; }
+        public required string LastName { get; init; }
+        public required string Link { get; init; }
+        public string? MiddleName { get; init; }
+        public required string TwitterId { get; init; }
+        public required string YouTubeId { get; init; }
     }
 
     private readonly HttpClient httpClient = new();
@@ -85,26 +65,90 @@ internal class GovTrackClient
     {
     }
 
-    public async Task GetMembersAsync(int offset)
+    private record Page(int Count, Member[] Members);
+
+    public async Task<Member[]> GetMembersAsync()
     {
-        var uri = GetUri(offset);
+        const int LIMIT = 100;
 
-        var json = await httpClient.GetStringAsync(uri);
+        var members = new List<Member>();
 
-        var options = GetJsonSerializerOptions();
-
-        var root = JsonSerializer.Deserialize<Root>(json, options);
-    }
-
-    private JsonSerializerOptions GetJsonSerializerOptions()
-    {
-        return new JsonSerializerOptions()
+        async Task<Page> GetPageAsync(int offset)
         {
-            PropertyNameCaseInsensitive = true
-        };
+            var uri = GetUri(offset, LIMIT);
+
+            var json = await httpClient.GetStringAsync(uri);
+
+            var options = GetJsonSerializerOptions();
+
+            var root = JsonSerializer.Deserialize<Root>(json, options);
+
+            var page = new List<Member>();
+
+            foreach (var item in root!.Items!)
+            {
+                members.Add(new Member()
+                {
+                    Address = item.Extra!.Address!,
+                    BioGuideId = item.Person!.BioGuideId!,
+                    Birthday = item.Person!.Birthday!,
+                    ContactUri = item.Extra?.ContactForm?.Convert(
+                        v => v is null ? null : new Uri(v)),
+                    District = item!.District.IntOrNull(),
+                    EndDate = item!.EndDate,
+                    FirstName = item.Person!.FirstName!,
+                    Gender = item.Person!.Gender!,
+                    GovTrackUri = new Uri(item.Person!.Link!),
+                    LastName = item.Person!.LastName!,
+                    MiddleName = item.Person!.MiddleName!,
+                    Office = item.Extra!.Office!,
+                    Party = item.Party!,
+                    Phone = item.Phone!,
+                    Role = item.Role!,
+                    RssUri = item.Extra?.RssUrl?.Convert(
+                        v => v is null ? null : new Uri(v)),
+                    StartDate = item!.StartDate,
+                    State = item!.State,
+                    TwitterId = item.Person!.TwitterId!,
+                    Website = item.Website!,
+                    YouTubeId = item.Person!.YouTubeId!
+                });
+            }
+
+            return new Page(root.Meta!.Count, [.. page]);
+        }
+
+        var offset = 0;
+
+        while (true)
+        {
+            var page = await GetPageAsync(offset);
+
+            members.AddRange(page.Members);
+
+            offset += LIMIT;
+
+            if (members.Count >= page.Count)
+                break;
+        }
+
+        return [.. members];
     }
 
-    private static Uri GetUri(int offset)
+    private static JsonSerializerOptions GetJsonSerializerOptions()
+    {
+        var options = new JsonSerializerOptions()
+        {
+            PropertyNameCaseInsensitive = true,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString
+        };
+
+        options.Converters.Add(new JsonStringEnumConverter());
+
+        return options;
+    }
+
+    private static Uri GetUri(int skip, int take)
     {
         const string BASE_URI = "https://www.govtrack.us";
 
@@ -113,9 +157,8 @@ internal class GovTrackClient
             .AppendPathSegment("v2")
             .AppendPathSegment("role")
             .WithQueryParam("current", true)
-            .WithQueryParam("offset", offset)
-            .WithQueryParam("limit", 2)
+            .WithQueryParam("offset", skip)
+            .WithQueryParam("limit", take)
             .GetUri();
     }
-
 }
